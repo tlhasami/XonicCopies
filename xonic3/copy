@@ -1,0 +1,300 @@
+void l1(RenderWindow &window)
+{
+    Texture tileTexture, gameOverTexture, enemyTexture;
+    loadTextures(tileTexture, gameOverTexture, enemyTexture);
+
+    Sprite tileSprite(tileTexture), gameOverSprite(gameOverTexture), enemySprite(enemyTexture);
+    gameOverSprite.setPosition(100, 100);
+    enemySprite.setOrigin(20, 20);
+
+    const int maxEnemies = 2;
+    Enemy enemies[maxEnemies];
+
+    bool isGameRunning = true;
+    int playerX = 0, playerY = 0, dirX = 0, dirY = 0;
+    float animationTimer = 0, animationDelay = 0.07;
+
+    Clock frameClock;
+    Clock gameOverClock;
+    Clock TimePassed;
+    bool gameOverClockStarted = false;
+
+    bool safe_zone = false;
+
+    int moves = 0;
+    int tilesCollected = 0;
+    int currentScore = 0;
+
+    int prev_high_score = 0;
+
+    int bonus = 0;
+
+    int bonusApplier = 10;
+
+    int scoreMultiplier = 2;
+
+    int powerUps = 0;
+
+    int lastPowerUpScore = 0;
+
+    bool isPowerUpActive = false;
+
+    Clock powerUpClock;
+
+    setupGrid(); // Setup initial game grid
+
+    while (window.isOpen())
+    {
+        float deltaTime = frameClock.getElapsedTime().asSeconds();
+        frameClock.restart();
+        animationTimer += deltaTime;
+
+        Event event;
+        while (window.pollEvent(event))
+        {
+            if (event.type == Event::Closed)
+                window.close();
+
+            if (event.type == Event::KeyPressed && event.key.code == Keyboard::P)
+            {
+                if (!isPowerUpActive && powerUps > 0)
+                {
+                    isPowerUpActive = true;
+                    powerUps--;
+                    powerUpClock.restart();
+                }
+            }
+        }
+
+        if (!isGameRunning)
+        {
+            if (!gameOverClockStarted)
+            {
+                gameOverClock.restart();
+                gameOverClockStarted = true;
+            }
+            else if (gameOverClock.getElapsedTime().asSeconds() >= 2.5)
+            {
+                scores[scoreCount++] = currentScore;
+                writeScores();
+                cout << "score is written " << endl;
+                GameOverScreen(window, TimePassed, currentScore, tilesCollected, ++moves, getHighestScore());
+
+                return;
+            }
+        }
+
+        // Handle player movement
+
+        if (Keyboard::isKeyPressed(Keyboard::Left))
+        {
+            dirX = -1;
+            dirY = 0;
+        }
+        if (Keyboard::isKeyPressed(Keyboard::Right))
+        {
+            dirX = 1;
+            dirY = 0;
+        }
+        if (Keyboard::isKeyPressed(Keyboard::Up))
+        {
+            dirX = 0;
+            dirY = -1;
+        }
+        if (Keyboard::isKeyPressed(Keyboard::Down))
+        {
+            dirX = 0;
+            dirY = 1;
+        }
+
+        if (!isGameRunning)
+            continue;
+
+        // Move player every frame if enough time has passed
+        if (animationTimer > animationDelay)
+        {
+            playerX += dirX;
+            playerY += dirY;
+
+            // Keep player inside grid bounds
+            if (playerX < 0)
+                playerX = 0;
+            if (playerX > cols - 1)
+                playerX = cols - 1;
+            if (playerY < 0)
+                playerY = 0;
+            if (playerY > row - 1)
+                playerY = row - 1;
+
+            // Check for collision with self
+            if (grid[playerY][playerX] == 2)
+                isGameRunning = false;
+
+            // Mark visited cell
+            if (grid[playerY][playerX] == 0)
+            {
+                safe_zone = true;
+                grid[playerY][playerX] = 2;
+            }
+
+            animationTimer = 0;
+        }
+
+        // Move all enemies
+        if (!isPowerUpActive || powerUpClock.getElapsedTime().asSeconds() >= 3)
+        {
+            isPowerUpActive = false;
+
+            for (int i = 0; i < maxEnemies; i++)
+                enemies[i].move();
+        }
+
+        // If player hits a tile (special zone)
+        if (grid[playerY][playerX] == 1)
+        {
+            dirX = dirY = 0;
+            if (safe_zone)
+            {
+                moves += 1;
+            }
+
+            safe_zone = false;
+
+            // Drop traps under enemy positions
+            for (int i = 0; i < maxEnemies; i++)
+                drop(enemies[i].y / tileSize, enemies[i].x / tileSize);
+
+            // Reset grid
+
+            int tileNow = 0;
+
+            for (int i = 0; i < row; i++)
+                for (int j = 0; j < cols; j++)
+                    if (grid[i][j] == -1)
+                        grid[i][j] = 0;
+                    else if (grid[i][j] == 0 || grid[i][j] == 2)
+                    {
+
+                        tileNow += 1;
+
+                        grid[i][j] = 1;
+                    }
+
+            tilesCollected += tileNow;
+
+            if (tileNow > bonusApplier)
+            {
+                currentScore += (tileNow * scoreMultiplier);
+                bonus += 1;
+            }
+            else
+            {
+                currentScore += tileNow;
+            }
+
+            if (bonus == 3)
+            {
+                bonusApplier = 5;
+            }
+            else if (bonus > 5)
+            {
+                scoreMultiplier = 4;
+            }
+
+            // First power-up (at 50)
+            if (currentScore >= 50 && lastPowerUpScore < 50)
+            {
+                powerUps++;
+                lastPowerUpScore = 50;
+            }
+
+            // Subsequent power-ups every 30 points after 70
+            else if (currentScore >= 70 && currentScore - lastPowerUpScore >= 30)
+            {
+                powerUps++;
+                lastPowerUpScore = currentScore;
+            }
+        }
+
+        // End game if enemy touches player trail
+        for (int i = 0; i < maxEnemies; i++)
+            if (grid[enemies[i].y / tileSize][enemies[i].x / tileSize] == 2)
+                isGameRunning = false;
+
+        ///////// DRAW SECTION /////////
+        // Check if power-up is active and applied
+        if (isPowerUpActive)
+        {
+            // Change background color to white
+            window.clear(Color(33, 33, 36));
+        }
+        else
+        {
+            // Default background color when power-up is not active
+            window.clear(Color::Black);
+        }
+
+        // Rest of the game logic...
+
+        // Draw grid tiles
+        for (int i = 0; i < row; i++)
+            for (int j = 0; j < cols; j++)
+            {
+                if (grid[i][j] == 0)
+                    continue;
+
+                if (grid[i][j] == 1)
+                    tileSprite.setTextureRect(IntRect(0, 0, tileSize, tileSize));
+                else if (grid[i][j] == 2)
+                    tileSprite.setTextureRect(IntRect(54, 0, tileSize, tileSize));
+
+                tileSprite.setPosition(j * tileSize, i * tileSize);
+                window.draw(tileSprite);
+            }
+
+        // Draw player
+        tileSprite.setTextureRect(IntRect(36, 0, tileSize, tileSize));
+        tileSprite.setPosition(playerX * tileSize, playerY * tileSize);
+        window.draw(tileSprite);
+
+        // Draw rotating enemies
+        enemySprite.rotate(10);
+        for (int i = 0; i < maxEnemies; i++)
+        {
+            enemySprite.setPosition(enemies[i].x, enemies[i].y);
+            window.draw(enemySprite);
+        }
+
+        // Show game over screen if not running
+        if (!isGameRunning)
+            window.draw(gameOverSprite);
+
+        // Time display
+        int timeElapsed = static_cast<int>(TimePassed.getElapsedTime().asSeconds());
+        drawText(window, "Time: " + to_string(timeElapsed) + " sec", 0.5f, 0.5f, 25.0f, 470.0f, Color::Yellow);
+
+        // Score display
+        drawText(window, "Score: " + to_string(currentScore), 0.5f, 0.5f, 180.0f + 30.f, 470.0f, Color::Cyan);
+
+        // Tiles collected display
+        drawText(window, "Tiles: " + to_string(tilesCollected), 0.5f, 0.5f, 350.0f + 30.f, 470.0f, Color::Green);
+
+        // Power-up display
+        drawText(window, "Power-Ups: " + to_string(powerUps), 0.5f, 0.5f, 540.0f, 470.0f, Color::Magenta);
+
+        if (isPowerUpActive)
+        {
+            // Display power-up message
+            float remainingTime = 3.0f - powerUpClock.getElapsedTime().asSeconds();
+
+            // Display the remaining time
+            if (remainingTime > 0.0f)
+            {
+                drawText(window, "Power Activated! Time Left: " + to_string(static_cast<int>(remainingTime)) + "s",
+                         0.5f, 0.5f, 50.0f, 50.0f, Color::Red);
+            }
+        }
+
+        window.display();
+    }
+}

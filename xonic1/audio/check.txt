@@ -1,0 +1,7 @@
+
+Run this if Music Not working : 
+
+
+for file in *.ogg; do ffmpeg -i "$file" -c:a libvorbis "output_${file}";
+rm "$file"; mv "output_${file}" "$file"; 
+done
